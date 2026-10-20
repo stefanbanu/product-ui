@@ -1,1 +1,74 @@
-/* You can add global styles to this file, and also import other style files */
+/* One place for the shared tokens; components only reference the variables. Both schemes are
+   defined because a dev tool gets left open all day. */
+:root {
+  --bg: #ffffff;
+  --fg: #1f2328;
+  --muted: #6b7280;
+  --border: #d9dde3;
+  --panel-bg: #fbfcfd;
+  --code-bg: #f3f4f6;
+  --input-bg: #ffffff;
+  --link: #1d4ed8;
+  --accent: #1f2328;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #15181c;
+    --fg: #e6e8ea;
+    --muted: #9aa3ad;
+    --border: #2d333b;
+    --panel-bg: #1b1f24;
+    --code-bg: #101316;
+    --input-bg: #0f1216;
+    --link: #7aa2f7;
+    --accent: #e6e8ea;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 1.5rem;
+  background: var(--bg);
+  color: var(--fg);
+  font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+code, pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  margin: 0;
+}
+
+h2 {
+  margin: 0 0 .75rem;
+  font-size: .95rem;
+}
+
+.panel {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-bg);
+  padding: 1rem;
+}
+
+.panel > header { margin-bottom: .75rem; }
+.panel > header h2 { margin: 0; }
+
+button {
+  padding: .35rem .7rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--input-bg);
+  color: inherit;
+  font: inherit;
+  font-size: .85rem;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) { border-color: var(--accent); }
+button:disabled { opacity: .5; cursor: not-allowed; }
+button.danger:hover:not(:disabled) { border-color: #b91c1c; color: #b91c1c; }
+
+a { color: var(--link); }
