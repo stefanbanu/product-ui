@@ -59,10 +59,14 @@ A few things are deliberate:
   touch the inspector, or it would overwrite the `201` and its `Location` the instant they
   appeared.
 
-## Concurrent edits
+## Concurrent edits: why Edit does a GET first
 
-`PUT` on the API requires an `If-Match` header carrying the ETag from a prior read, so the
-flow in this UI is deliberately read-then-write:
+The API guards updates with optimistic locking. Two people editing the same product used to
+both get `200` and the first edit vanished silently — `PUT` is a full replacement, so the
+second writer sends back the stale fields it read. The server now keeps a version per row,
+hands it out as an `ETag`, and requires it back in `If-Match` before it will accept a write.
+
+That makes the flow here deliberately read-then-write:
 
 1. **Edit** on a row issues `GET /products/{id}` — the table's rows have no ETags, because
    the collection endpoint does not issue them. That GET is where the token comes from, and
@@ -72,8 +76,54 @@ flow in this UI is deliberately read-then-write:
    their change. A banner appears offering **Reload**, and your typed values stay on screen
    so you can reapply them to the refreshed copy.
 
-To see it, open the app in two tabs, click **Edit** on the same row in both, save in one,
-then save in the other.
+### Try it
+
+Open the app in two tabs, click **Edit** on the same row in both, change something and save
+in tab B, then save in tab A. Watch the inspector in each:
+
+```
+tab A   GET /products/5    200   got ETag "2"
+tab B   GET /products/5    200   got ETag "2"        both hold the same version
+tab B   PUT /products/5    200   sent If-Match "2"   got ETag "3"
+tab A   PUT /products/5    412   sent If-Match "2"   refused - the row is at 3 now
+tab A   (Reload)           200   got ETag "3"        tab B's values, fresh token
+tab A   PUT /products/5    200   sent If-Match "3"   got ETag "4"
+```
+
+Both people's changes survive: B's edit, then A's reapplied on top. Without `If-Match`,
+step four would have been a `200` that quietly erased B.
+
+### What the code does
+
+`ProductService.update` takes the token and sends it as a header; everything else about the
+request is unchanged:
+
+```ts
+update(id: string, request: ProductRequest, etag: string | null) {
+  return this.track('PUT', url,
+    this.http.put<Product>(url, request, { observe: 'response', headers: this.ifMatch(etag) }),
+    etag);
+}
+```
+
+`App` holds the token for whatever is in the form in an `editingEtag` signal, set by the GET
+that loaded it and cleared whenever the form is. `ApiCall` records both halves — `etag` from
+the response, `ifMatch` from the request — which is what the inspector renders, so the
+handshake is visible rather than inferred.
+
+Three states to know:
+
+| What you see | What it means |
+|---|---|
+| `412 Precondition Failed` | Someone wrote after you loaded. Reload, reapply, save again. |
+| `428 Precondition Required` | The request went out with no `If-Match` — a bug here, not a conflict. It means the form was submitted without a token, i.e. `editingEtag` was null. |
+| `200` + a new `got ETag` | Accepted. The returned token is immediately usable, so a second edit needs no re-read. |
+
+The enforcement lives in the API, not here: the version check is a `WHERE version = ?` on
+the UPDATE. This app cannot cause or prevent a conflict, only carry the token honestly and
+react when the server refuses. See the
+[product-service README](https://github.com/stefanbanu/product-service#how-it-works-version)
+for the `@Version` side of it.
 
 ## No CORS, by design
 
@@ -91,11 +141,12 @@ This is why every URL in `product.service.ts` is relative. Hardcoding
 src/app/
   product.model.ts            Product, ProductRequest, ProblemDetail, ApiCall
   product.service.ts          one method per endpoint; the whole exchange, not just the body
+                              - carries the ETag out as If-Match on writes
   product.service.spec.ts     error-as-value and 204-as-null mappings
   app.ts                      composes the panels, owns the product list and edit target
   components/
     product-list.ts           the table
-    product-form.ts           create/replace, with the validation toggle
+    product-form.ts           create/replace, validation toggle, 412 conflict banner
     product-fetch.ts          arbitrary-id GET and DELETE
     response-inspector.ts     the last exchange
 ```
