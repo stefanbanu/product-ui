@@ -25,7 +25,7 @@ import { ProductService } from './product.service';
           [products]="products()"
           [busy]="busy()"
           (refresh)="load()"
-          (edit)="editing.set($event)"
+          (edit)="startEdit(String($event.id))"
           (remove)="remove(String($event.id))" />
 
         <app-product-form
@@ -33,8 +33,10 @@ import { ProductService } from './product.service';
           [busy]="busy()"
           [serverErrors]="serverErrors()"
           [resetToken]="resetToken()"
+          [conflicted]="conflicted()"
           (submitted)="save($event)"
-          (cancel)="editing.set(null)" />
+          (reload)="startEdit(String(editing()!.id))"
+          (cancel)="clearEdit()" />
 
         <app-product-fetch [busy]="busy()" (fetch)="fetchOne($event)" (remove)="remove($event)" />
       </div>
@@ -60,6 +62,16 @@ export class App {
   protected readonly products = signal<Product[]>([]);
   protected readonly editing = signal<Product | null>(null);
   protected readonly busy = signal(false);
+
+  /**
+   * The ETag of the product currently in the form, from the GET that loaded it. This is the
+   * concurrency token: without it the PUT would be unconditional and the server would answer
+   * 428. It is replaced on every reload and cleared whenever the form is.
+   */
+  protected readonly editingEtag = signal<string | null>(null);
+
+  /** True after a 412, until the stale copy is reloaded or abandoned. */
+  protected readonly conflicted = signal(false);
 
   /**
    * Bumped after a successful write to clear the form. A plain `editing.set(null)` cannot do
@@ -96,21 +108,52 @@ export class App {
   protected fetchOne(id: string): void {
     this.run(this.service.get(id), (call) => {
       // Loading a single product into the form makes the next PUT replace that row, which is
-      // the natural follow-on from having just looked at it.
-      if (call.status === 200) this.editing.set(call.body as Product);
+      // the natural follow-on from having just looked at it - and the GET is also where the
+      // ETag that PUT requires comes from.
+      if (call.status === 200) this.adoptForEditing(call.body as Product, call.etag);
     });
+  }
+
+  /**
+   * Edit always re-reads the product rather than using the row already in the table. The
+   * table has no ETags - the collection endpoint does not issue them - and without one the
+   * PUT cannot be made conditional. It also means the form opens on the current state
+   * rather than on whatever the last refresh happened to catch.
+   */
+  protected startEdit(id: string): void {
+    this.fetchOne(id);
+  }
+
+  protected clearEdit(): void {
+    this.editing.set(null);
+    this.editingEtag.set(null);
+    this.conflicted.set(false);
+  }
+
+  private adoptForEditing(product: Product, etag: string | null): void {
+    this.editing.set(product);
+    this.editingEtag.set(etag);
+    this.conflicted.set(false);
   }
 
   protected save(submission: SubmitRequest): void {
     const request = submission.id
-      ? this.service.update(submission.id, submission.request)
+      ? this.service.update(submission.id, submission.request, this.editingEtag())
       : this.service.create(submission.request);
 
     this.run(request, (call) => {
+      // 412 means the row moved on since the form was loaded. The payload stays on screen -
+      // it is the user's work - and the banner offers to reload the server's version.
+      if (call.status === 412) {
+        this.conflicted.set(true);
+        this.load({ silent: true });
+        return;
+      }
+
       // 200 for a replace, 201 for a create. Anything else leaves the form as it is so the
       // rejected payload is still on screen next to the error that describes it.
       if (call.status === 200 || call.status === 201) {
-        this.editing.set(null);
+        this.clearEdit();
         this.resetToken.update((token) => token + 1);
         // Silent: this refresh must not replace the 201 in the inspector.
         this.load({ silent: true });
@@ -121,7 +164,7 @@ export class App {
   protected remove(id: string): void {
     this.run(this.service.delete(id), (call) => {
       if (call.status === 204) {
-        if (this.editing()?.id === Number(id)) this.editing.set(null);
+        if (this.editing()?.id === Number(id)) this.clearEdit();
         this.load({ silent: true });
       }
     });

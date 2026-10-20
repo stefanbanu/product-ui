@@ -70,4 +70,42 @@ describe('ProductService', () => {
     expect(call?.status).toBe(0);
     expect(call?.transportError).toBeTruthy();
   });
+
+  it('sends the ETag back as If-Match and records both sides of the exchange', () => {
+    let call: ApiCall | undefined;
+    service.update('5', { name: 'Headset', price: 249 }, '"3"').subscribe((r) => (call = r));
+
+    const request = http.expectOne('/products/5');
+    expect(request.request.headers.get('If-Match')).toBe('"3"');
+
+    request.flush(
+      { id: 5, name: 'Headset', price: 249, createdAt: '2026-10-20T00:00:00Z' },
+      { status: 200, statusText: 'OK', headers: { ETag: '"4"' } },
+    );
+
+    expect(call?.ifMatch).toBe('"3"');
+    expect(call?.etag).toBe('"4"');
+  });
+
+  it('surfaces a 412 as a value so the conflict banner can react to it', () => {
+    let call: ApiCall | undefined;
+    service.update('5', { name: 'Stale', price: 1 }, '"2"').subscribe((r) => (call = r));
+
+    http.expectOne('/products/5').flush(
+      { title: 'Precondition failed', status: 412, detail: 'Product 5 was modified by someone else' },
+      { status: 412, statusText: 'Precondition Failed' },
+    );
+
+    expect(call?.status).toBe(412);
+    expect(call?.body).toMatchObject({ title: 'Precondition failed' });
+  });
+
+  it('omits If-Match entirely when there is no ETag to send', () => {
+    service.delete('4').subscribe();
+
+    const request = http.expectOne('/products/4');
+    expect(request.request.headers.has('If-Match')).toBe(false);
+
+    request.flush(null, { status: 204, statusText: 'No Content' });
+  });
 });

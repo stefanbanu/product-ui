@@ -40,10 +40,11 @@ discards whatever you created and restores the ten seeded products.
 | Panel | Exercises |
 |---|---|
 | **Products** table — Refresh | `GET /products` |
-| **Products** table — Edit / Delete per row | `PUT /products/{id}` · `DELETE /products/{id}` |
+| **Products** table — Edit | `GET /products/{id}` (for its ETag), then `PUT /products/{id}` |
+| **Products** table — Delete | `DELETE /products/{id}` |
 | **POST / PUT** form | `POST /products` · `PUT /products/{id}` |
 | **/products/:id** panel | `GET /products/{id}` · `DELETE /products/{id}` with any id |
-| **Last response** | status, duration, `Location`, field errors, body |
+| **Last response** | status, duration, `ETag`, sent `If-Match`, `Location`, field errors, body |
 
 A few things are deliberate:
 
@@ -57,6 +58,22 @@ A few things are deliberate:
 - **The refresh after a create or delete is silent.** It updates the table but does not
   touch the inspector, or it would overwrite the `201` and its `Location` the instant they
   appeared.
+
+## Concurrent edits
+
+`PUT` on the API requires an `If-Match` header carrying the ETag from a prior read, so the
+flow in this UI is deliberately read-then-write:
+
+1. **Edit** on a row issues `GET /products/{id}` — the table's rows have no ETags, because
+   the collection endpoint does not issue them. That GET is where the token comes from, and
+   the inspector shows it as `got ETag`.
+2. **Replace** sends it straight back as `If-Match`, shown as `sent If-Match`.
+3. If someone else wrote in between, the server answers **`412`** instead of overwriting
+   their change. A banner appears offering **Reload**, and your typed values stay on screen
+   so you can reapply them to the refreshed copy.
+
+To see it, open the app in two tabs, click **Edit** on the same row in both, save in one,
+then save in the other.
 
 ## No CORS, by design
 

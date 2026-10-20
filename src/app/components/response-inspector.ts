@@ -30,6 +30,20 @@ import { ApiCall, isProblemDetail } from '../product.model';
             <span class="duration">{{ c.durationMs }} ms</span>
           </div>
 
+          @if (c.ifMatch) {
+            <div class="line">
+              <span class="label">sent If-Match</span>
+              <code class="token">{{ c.ifMatch }}</code>
+            </div>
+          }
+
+          @if (c.etag) {
+            <div class="line">
+              <span class="label">got ETag</span>
+              <code class="token">{{ c.etag }}</code>
+            </div>
+          }
+
           @if (c.location) {
             <div class="line">
               <span class="label">Location</span>
@@ -72,6 +86,7 @@ import { ApiCall, isProblemDetail } from '../product.model';
     .duration { color: var(--muted); font-variant-numeric: tabular-nums; }
     .label { color: var(--muted); font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; }
     .location { overflow-wrap: anywhere; }
+    .token { background: var(--code-bg); padding: .05rem .35rem; border-radius: 3px; }
     .errors ul { margin: .25rem 0 .75rem; padding-left: 1.2rem; }
     .body { background: var(--code-bg); padding: .75rem; border-radius: 6px; overflow-x: auto;
             max-height: 60vh; font-size: .85rem; }

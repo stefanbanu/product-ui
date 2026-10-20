@@ -1,4 +1,4 @@
-import { HttpClient, HttpErrorResponse, HttpResponse } from '@angular/common/http';
+import { HttpClient, HttpErrorResponse, HttpHeaders, HttpResponse } from '@angular/common/http';
 import { Injectable, inject, signal } from '@angular/core';
 import { Observable, catchError, map, of } from 'rxjs';
 import { ApiCall, Product, ProductRequest } from './product.model';
@@ -45,10 +45,15 @@ export class ProductService {
       'GET',
       '/products',
       this.http.get<Product[]>('/products', { observe: 'response' }),
+      null,
       options.silent ?? false,
     );
   }
 
+  /**
+   * The only way to obtain a product's ETag, which is the only way to then update it. Read
+   * before write is a mechanism here, not a convention.
+   */
   get(id: string): Observable<ApiCall> {
     const url = `/products/${encodeURIComponent(id)}`;
     return this.track('GET', url, this.http.get<Product>(url, { observe: 'response' }));
@@ -62,31 +67,55 @@ export class ProductService {
     );
   }
 
-  update(id: string, request: ProductRequest): Observable<ApiCall> {
+  /**
+   * `etag` is whatever the last GET (or write) handed back, sent straight back as If-Match.
+   * The server refuses an unconditional PUT with 428, so this is not optional - and if the
+   * row has moved on since, the answer is 412 rather than a silent overwrite.
+   */
+  update(id: string, request: ProductRequest, etag: string | null): Observable<ApiCall> {
     const url = `/products/${encodeURIComponent(id)}`;
-    return this.track('PUT', url, this.http.put<Product>(url, request, { observe: 'response' }));
+
+    return this.track(
+      'PUT',
+      url,
+      this.http.put<Product>(url, request, { observe: 'response', headers: this.ifMatch(etag) }),
+      etag,
+    );
   }
 
   /**
    * 204 carries no body, so the response type is void and `body` lands as null. Asking
    * HttpClient to parse JSON out of an empty 204 is how this would throw instead.
    */
-  delete(id: string): Observable<ApiCall> {
+  delete(id: string, etag: string | null = null): Observable<ApiCall> {
     const url = `/products/${encodeURIComponent(id)}`;
-    return this.track('DELETE', url, this.http.delete<void>(url, { observe: 'response' }));
+
+    return this.track(
+      'DELETE',
+      url,
+      this.http.delete<void>(url, { observe: 'response', headers: this.ifMatch(etag) }),
+      etag,
+    );
+  }
+
+  private ifMatch(etag: string | null): HttpHeaders | undefined {
+    return etag ? new HttpHeaders({ 'If-Match': etag }) : undefined;
   }
 
   private track(
     method: string,
     url: string,
     request: Observable<HttpResponse<unknown>>,
+    ifMatch: string | null = null,
     silent = false,
   ): Observable<ApiCall> {
     const startedAt = performance.now();
 
     return request.pipe(
-      map((response) => this.toCall(method, url, startedAt, response)),
-      catchError((error: HttpErrorResponse) => of(this.toCall(method, url, startedAt, error))),
+      map((response) => this.toCall(method, url, startedAt, response, ifMatch)),
+      catchError((error: HttpErrorResponse) =>
+        of(this.toCall(method, url, startedAt, error, ifMatch)),
+      ),
       map((call) => (silent ? call : this.record(call))),
     );
   }
@@ -96,6 +125,7 @@ export class ProductService {
     url: string,
     startedAt: number,
     response: HttpResponse<unknown> | HttpErrorResponse,
+    ifMatch: string | null,
   ): ApiCall {
     const isError = response instanceof HttpErrorResponse;
 
@@ -106,6 +136,8 @@ export class ProductService {
       statusText: response.statusText,
       durationMs: Math.round(performance.now() - startedAt),
       location: response.headers?.get('Location') ?? null,
+      etag: response.headers?.get('ETag') ?? null,
+      ifMatch,
       body: isError ? response.error : response.body,
       // status 0 means the request never got a response: backend down, or the proxy is not
       // forwarding. Worth distinguishing, because every other field is meaningless then.

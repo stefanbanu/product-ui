@@ -39,6 +39,10 @@ export interface ApiCall {
   statusText: string;
   durationMs: number;
   location: string | null;
+  /** The ETag the server returned: the concurrency token for the next write. */
+  etag: string | null;
+  /** The If-Match this request carried, if any - shown so the exchange reads as a pair. */
+  ifMatch: string | null;
   body: unknown;
   /** Set when the request never reached the server at all - API down, proxy misconfigured. */
   transportError: string | null;

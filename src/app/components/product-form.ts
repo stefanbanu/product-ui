@@ -30,6 +30,15 @@ export interface SubmitRequest {
         }
       </header>
 
+      @if (conflicted()) {
+        <p class="conflict">
+          Someone else changed this product after you loaded it, so your copy is stale and
+          the server refused the write. Reload it to see their version, then reapply your
+          change.
+          <button type="button" (click)="reload.emit()">Reload</button>
+        </p>
+      }
+
       <form [formGroup]="form" (ngSubmit)="submit()">
         <label>
           <span>name</span>
@@ -79,6 +88,9 @@ export interface SubmitRequest {
     input[type='text'], input:not([type]) { padding: .4rem .5rem; border: 1px solid var(--border);
       border-radius: 4px; background: var(--input-bg); color: inherit; font: inherit; }
     .error { color: #b45309; font-size: .8rem; }
+    .conflict { border: 1px solid #b45309; border-radius: 6px; padding: .6rem .75rem;
+      margin: 0 0 .75rem; font-size: .85rem; line-height: 1.45; }
+    .conflict button { margin-left: .4rem; }
     button[type='submit'] { align-self: flex-start; }
   `,
 })
@@ -90,8 +102,12 @@ export class ProductForm {
   /** Changes to this value clear the form; see the field of the same name on App. */
   readonly resetToken = input(0);
 
+  /** Set after a 412: the row moved on, so the form is holding a stale snapshot. */
+  readonly conflicted = input(false);
+
   readonly submitted = output<SubmitRequest>();
   readonly cancel = output<void>();
+  readonly reload = output<void>();
 
   protected readonly bypass = signal(false);
 
